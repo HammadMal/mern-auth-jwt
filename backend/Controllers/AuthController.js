@@ -21,7 +21,7 @@ module.exports.Signup = async (req, res, next) => {
     const user = await User.create({ email, password :  hashedPassword , username, otp, otpExpires, isVerified: false, createdAt });
     await user.save();
 
-    
+
 
     const emailSent = await sendOTPEmail(email, otp, username);
 
@@ -194,4 +194,67 @@ module.exports.ResendOTP = async (req, res, next) => {
     });
   }
 };
+
+
+module.exports.Login = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+    if(!email || !password ){
+      return res.json({message:'All fields are required'})
+    }
+    const user = await User.findOne({ email });
+    if(!user){
+      return res.json({message:'Incorrect password or email' })
+    }
+    const auth = await bcrypt.compare(password,user.password)
+    if (!auth) {
+      return res.json({message:'Incorrect password or email' })
+    }
+     const token = createSecretToken(user._id);
+     res.cookie("token", token, {
+       withCredentials: true,
+       httpOnly: false,
+     });
+     res.status(201).json({ message: "User logged in successfully", success: true });
+     next()
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+module.exports.Logout = async (req, res, next) => {
+  try {
+    res.clearCookie("token", {
+      withCredentials: true,
+      httpOnly: false,
+    });
+    res.status(200).json({ message: "User logged out successfully", success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error. Please try again later.'
+    });
+  }
+}
+
+module.exports.ProtectedRoute = async (req, res, next) => {
+  try {
+    res.status(200).json({
+      success: true,
+      message: "Access granted to protected route",
+      user: {
+        id: req.user._id,
+        username: req.user.username,
+        email: req.user.email
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error. Please try again later.'
+    });
+  }
+}
 
