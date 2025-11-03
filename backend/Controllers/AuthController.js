@@ -7,6 +7,15 @@ const { generateOTP, sendOTPEmail } = require('../util/emailService');
 module.exports.Signup = async (req, res, next) => {
   try {
     const { email, password, username, createdAt } = req.body;
+
+    // Validate required fields for normal signup
+    if (!email || !password || !username) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email, password, and username are required'
+      });
+    }
+
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.json({ message: "User already exists" });
@@ -112,7 +121,10 @@ module.exports.VerifyOTP = async (req, res, next) => {
         const token = createSecretToken(user._id);
     res.cookie("token", token, {
       withCredentials: true,
-      httpOnly: false,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000 // 24 hours
     });
     res
       .status(201)
@@ -206,6 +218,15 @@ module.exports.Login = async (req, res, next) => {
     if(!user){
       return res.json({message:'Incorrect password or email' })
     }
+
+    // Check if user is OAuth user (no password set)
+    if (!user.password) {
+      return res.status(400).json({
+        success: false,
+        message: 'This account uses Google Sign-In. Please use Google to login.'
+      });
+    }
+
     const auth = await bcrypt.compare(password,user.password)
     if (!auth) {
       return res.json({message:'Incorrect password or email' })
@@ -213,7 +234,10 @@ module.exports.Login = async (req, res, next) => {
      const token = createSecretToken(user._id);
      res.cookie("token", token, {
        withCredentials: true,
-       httpOnly: false,
+       httpOnly: true,
+       secure: process.env.NODE_ENV === 'production',
+       sameSite: 'lax',
+       maxAge: 24 * 60 * 60 * 1000 // 24 hours
      });
      res.status(201).json({ message: "User logged in successfully", success: true });
      next()
