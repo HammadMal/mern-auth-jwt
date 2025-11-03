@@ -13,7 +13,7 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: [true, "Your password is required"],
+    required: false, // Optional for OAuth users
   },
 
   isVerified: {
@@ -27,10 +27,14 @@ const userSchema = new mongoose.Schema({
   otpExpires : {
     type: Date,
     default: null,
-    },  
+    },
   createdAt: {  
     type: Date,
     default: new Date(),
+  },
+  googleId: {
+    type: String,
+    default: null,
   },
 });
 

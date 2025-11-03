@@ -15,9 +15,17 @@ http://localhost:YOUR_PORT
 
 ## Authentication Flow
 
+### Standard Authentication (Email/Password)
 1. **Signup** → Receive OTP via email
 2. **Verify OTP** → Account activated & JWT token issued
 3. **Login** → JWT token issued
+4. **Access Protected Routes** → Token validated
+5. **Logout** → Token cleared
+
+### Google OAuth Authentication
+1. **Initiate Google Login** → Redirect to Google
+2. **Google Authentication** → User signs in with Google
+3. **Callback** → JWT token issued & user created/linked
 4. **Access Protected Routes** → Token validated
 5. **Logout** → Token cleared
 
@@ -58,6 +66,16 @@ http://localhost:YOUR_PORT
 ```
 
 **Error Responses:**
+
+- **Missing Required Fields (400):**
+
+```json
+{
+  "success": false,
+  "error": "Email, password, and username are required"
+}
+
+```
 
 - **User Already Exists:**
 
@@ -308,6 +326,16 @@ http://localhost:YOUR_PORT
 
 ```
 
+- **OAuth User Attempting Password Login (400):**
+
+```json
+{
+  "success": false,
+  "message": "This account uses Google Sign-In. Please use Google to login."
+}
+
+```
+
 **Postman Setup:**
 
 1. Method: `POST`
@@ -393,7 +421,84 @@ http://localhost:YOUR_PORT
 
 ---
 
-### 7. Protected Route (Example)
+### 7. Google OAuth Login
+
+**Endpoint:** `GET /auth/google`
+
+**Description:** Initiates Google OAuth 2.0 authentication flow. This endpoint must be accessed via a **browser**, not Postman.
+
+**Request Body:** None
+
+**Authentication Required:** No
+
+**Flow:**
+1. User visits `http://localhost:4000/auth/google` in browser
+2. Redirects to Google login page
+3. User signs in with Google account
+4. Google redirects back to `/auth/google/callback`
+5. Server creates/links user account
+6. Sets JWT token cookie
+7. Redirects to frontend: `http://localhost:3000/dashboard?auth=success`
+
+**Success:**
+- JWT token cookie is set
+- User is auto-verified (`isVerified: true`)
+- If email exists, Google account is linked to existing user
+- Redirects to: `CLIENT_URL/dashboard?auth=success`
+
+**Error:**
+- Redirects to: `CLIENT_URL/login?error=oauth_failed`
+
+**User Types:**
+
+**New Google User:**
+```javascript
+{
+  googleId: "google_user_id",
+  username: "Display Name from Google",
+  email: "user@gmail.com",
+  isVerified: true,
+  password: undefined // No password for OAuth users
+}
+```
+
+**Existing User (Email Match):**
+- Links Google account to existing user
+- Sets `googleId` field
+- Sets `isVerified: true`
+
+**Important Notes:**
+- Cannot be tested in Postman (requires browser for OAuth flow)
+- OAuth users don't have passwords
+- OAuth users cannot login via `/login` endpoint (password login)
+- If OAuth user tries password login, receives error: "This account uses Google Sign-In"
+
+**Browser Testing:**
+1. Visit: `http://localhost:4000/auth/google`
+2. Sign in with Google
+3. Check browser cookies (DevTools → Application → Cookies)
+4. Look for `token` cookie
+5. Verify redirect (will fail if frontend not running)
+
+---
+
+### 8. Google OAuth Callback
+
+**Endpoint:** `GET /auth/google/callback`
+
+**Description:** Callback endpoint for Google OAuth. Automatically called by Google after authentication. **Do not call directly.**
+
+**Request Body:** None
+
+**Handled Automatically By:**
+- Passport.js Google OAuth Strategy
+- Creates or links user account
+- Issues JWT token
+- Redirects to frontend
+
+---
+
+### 9. Protected Route (Example)
 
 **Endpoint:** `GET /protected`
 
@@ -701,9 +806,22 @@ PORT=4000
 MONGO_URL=your_mongodb_connection_string
 TOKEN_KEY=your_secret_key_for_jwt
 EMAIL_USER=your_email@gmail.com
-EMAIL_PASS=your_email_app_password
+EMAIL_PASSWORD=your_email_app_password
+GOOGLE_CLIENT_ID=your_google_oauth_client_id
+GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
+CLIENT_URL=http://localhost:3000
 
 ```
+
+**Getting Google OAuth Credentials:**
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select existing one
+3. Enable Google+ API
+4. Go to Credentials → Create Credentials → OAuth 2.0 Client ID
+5. Set Authorized JavaScript origins: `http://localhost:4000`
+6. Set Authorized redirect URIs: `http://localhost:4000/auth/google/callback`
+7. Copy Client ID and Client Secret to `.env`
 
 ---
 
@@ -718,7 +836,8 @@ MERN Auth API
 │   ├── Verify OTP
 │   ├── Resend OTP
 │   ├── Login
-│   └── Logout
+│   ├── Logout
+│   └── Google OAuth (Browser Only)
 ├── User
 │   ├── Check Auth Status
 │   └── Protected Route
@@ -726,7 +845,8 @@ MERN Auth API
     ├── Invalid Login
     ├── Invalid OTP
     ├── Access Without Token
-    └── Duplicate Signup
+    ├── Duplicate Signup
+    └── OAuth User Password Login
 
 ```
 
@@ -810,8 +930,20 @@ app.use(cors({
 
 1. **Password Security:** Passwords are hashed using bcrypt (12 rounds)
 2. **OTP Expiration:** OTPs expire after 10 minutes
-3. **JWT Token:** Stored in httpOnly cookie (set to false in current implementation - consider setting to true for production)
+3. **JWT Token Security:**
+   - Stored in httpOnly cookie (protects against XSS attacks)
+   - `secure` flag enabled in production (HTTPS only)
+   - `sameSite: 'lax'` (protects against CSRF)
+   - 24-hour expiration
 4. **Token Expiration:** Configure in `util/SecretToken.js`
+5. **OAuth Security:**
+   - OAuth users have no password (prevents password-based attacks)
+   - Email verification automatic for OAuth users
+   - Google handles authentication (delegated security)
+6. **Account Protection:**
+   - OAuth users cannot login via password endpoint
+   - Password validation enforced for normal signup
+   - Existing accounts can be linked to Google OAuth
 
 ---
 
@@ -822,15 +954,34 @@ app.use(cors({
 ```javascript
 {
   email: String (required, unique),
-  password: String (required, hashed),
+  password: String (optional, hashed) // Required for email/password auth, undefined for OAuth users,
   username: String (required),
   otp: String (temporary),
   otpExpires: Date (temporary),
-  isVerified: Boolean (default: false),
+  isVerified: Boolean (default: false, true for OAuth users),
+  googleId: String (optional, set for Google OAuth users),
   createdAt: Date
 }
 
 ```
+
+**User Types:**
+
+1. **Email/Password User:**
+   - Has `password` (hashed with bcrypt)
+   - `googleId` is `null`
+   - Requires OTP verification (`isVerified` starts as `false`)
+
+2. **Google OAuth User:**
+   - No `password` field (undefined)
+   - Has `googleId` from Google
+   - Auto-verified (`isVerified: true`)
+   - Cannot login via password endpoint
+
+3. **Linked Account User:**
+   - Has both `password` and `googleId`
+   - Created via email/password, then linked with Google
+   - Can login via both methods
 
 ---
 
@@ -898,5 +1049,9 @@ For issues or questions, please refer to the documentation and don't contact me.
 
 ---
 
-**Last Updated:** 2025-10-27
-**API Version:** 1.0.0
+**Last Updated:** 2025-11-03
+**API Version:** 1.1.0
+
+**Changelog:**
+- v1.1.0: Added Google OAuth 2.0 authentication
+- v1.0.0: Initial release with email/password authentication
